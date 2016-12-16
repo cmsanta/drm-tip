@@ -1652,6 +1652,9 @@ struct drm_i915_reset_stats {
 	/* All resets since boot/module reload, for all contexts */
 	__u32 reset_count;
 
+	/* Engine resets since boot/module reload, for all contexts */
+	__u32 reset_engine_count;
+
 	/* Number of batches lost when active in GPU, for this context */
 	__u32 batch_active;
 
@@ -1659,6 +1662,7 @@ struct drm_i915_reset_stats {
 	__u32 batch_pending;
 
 	__u32 pad;
+
 };
 
 struct drm_i915_gem_userptr {
