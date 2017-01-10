@@ -1200,6 +1200,26 @@ void i915_clear_error_registers(struct drm_i915_private *i915)
 	}
 }
 
+void engine_reset_error_to_str(struct drm_i915_private *i915,
+                  char *msg,
+                  size_t sz,
+                  unsigned int hung,
+                  unsigned int stuck,
+                  unsigned int watchdog)
+{
+       int len;
+       unsigned int tmp;
+       struct intel_engine_cs *engine;
+
+       len = scnprintf(msg, sz,
+                       "%s on ", watchdog ? "watchdog timeout" :
+                               stuck == hung ? "no_progress" : "hang");
+       for_each_engine_masked(engine, i915, hung, tmp)
+               len += scnprintf(msg + len, sz - len,
+                               "%s, ", engine->name);
+       msg[len-2] = '\0';
+}
+
 /**
  * i915_handle_error - handle a gpu error
  * @i915: i915 device private

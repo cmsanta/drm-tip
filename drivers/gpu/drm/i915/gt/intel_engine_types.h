@@ -135,6 +135,11 @@ struct intel_engine_execlists {
 	 */
 	struct tasklet_struct tasklet;
 
+       /*
+        * @watchdog_tasklet: stop counter and reschedule hangcheck_work asap
+        */
+       struct tasklet_struct watchdog_tasklet;
+
 	/**
 	 * @default_priolist: priority list for I915_PRIORITY_NORMAL
 	 */
