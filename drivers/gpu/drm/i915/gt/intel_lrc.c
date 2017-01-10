@@ -2078,15 +2078,75 @@ static void execlists_reset_finish(struct intel_engine_cs *engine)
 		  atomic_read(&execlists->tasklet.count));
 }
 
+static u32 *gen8_emit_start_watchdog(struct i915_request *rq, u32 *cs)
+{
+       struct intel_engine_cs *engine = rq->engine;
+       struct i915_gem_context *ctx = rq->gem_context;
+       struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
+
+       GEM_BUG_ON(!intel_engine_supports_watchdog(engine));
+
+       /*
+        * watchdog register must never be programmed to zero. This would
+        * cause the watchdog counter to exceed and not allow the engine to
+        * go into IDLE state
+        */
+       GEM_BUG_ON(ce->watchdog_threshold == 0);
+
+       /* Set counter period */
+       *cs++ = MI_LOAD_REGISTER_IMM(2);
+       *cs++ = i915_mmio_reg_offset(RING_THRESH(engine->mmio_base));
+       *cs++ = ce->watchdog_threshold;
+       /* Start counter */
+       *cs++ = i915_mmio_reg_offset(RING_CNTR(engine->mmio_base));
+       *cs++ = GEN8_WATCHDOG_ENABLE;
+
+       return cs;
+}
+
+static u32 *gen8_emit_stop_watchdog(struct i915_request *rq, u32 *cs)
+{
+	struct intel_engine_cs *engine = rq->engine;
+
+	GEM_BUG_ON(!intel_engine_supports_watchdog(engine));
+
+	*cs++ = MI_LOAD_REGISTER_IMM(1);
+	*cs++ = i915_mmio_reg_offset(RING_CNTR(engine->mmio_base));
+	*cs++ = engine->watchdog_disable_id;
+
+	return cs;
+}
+
 static int gen8_emit_bb_start(struct i915_request *rq,
 			      u64 offset, u32 len,
 			      const unsigned int flags)
 {
+	struct intel_engine_cs *engine = rq->engine;
+	struct i915_gem_context *ctx = rq->gem_context;
+	struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
 	u32 *cs;
+	u32 num_dwords;
+	bool enable_watchdog = false;
 
-	cs = intel_ring_begin(rq, 6);
+	/* bb_start only */
+	num_dwords = 6;
+
+	/* check if watchdog will be required */
+	if (ce->watchdog_threshold != 0) {
+		/* + start_watchdog (6) + stop_watchdog (4) */
+		num_dwords += 10;
+		enable_watchdog = true;
+	}
+
+	cs = intel_ring_begin(rq, num_dwords);
+
 	if (IS_ERR(cs))
 		return PTR_ERR(cs);
+
+	if (enable_watchdog) {
+		/* Start watchdog timer */
+		cs = gen8_emit_start_watchdog(rq, cs);
+	}
 
 	/*
 	 * WaDisableCtxRestoreArbitration:bdw,chv
@@ -2114,7 +2174,14 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 	*cs++ = upper_32_bits(offset);
 
 	*cs++ = MI_ARB_ON_OFF | MI_ARB_DISABLE;
-	*cs++ = MI_NOOP;
+
+	if (enable_watchdog) {
+		/* Cancel watchdog timer */
+		cs = gen8_emit_stop_watchdog(rq, cs);
+	}
+
+	if (*cs%2 != 0)
+		*cs++ = MI_NOOP;
 
 	intel_ring_advance(rq, cs);
 
@@ -2233,6 +2300,15 @@ static int gen8_emit_flush_render(struct i915_request *request,
 	intel_ring_advance(request, cs);
 
 	return 0;
+}
+
+/* From GEN9 onwards, all engines use the same RING_CNTR format */
+u32 get_watchdog_disable(struct intel_engine_cs *engine)
+{
+	if (engine->id == RCS0 || INTEL_GEN(engine->i915) >= 9)
+		return GEN8_WATCHDOG_DISABLE;
+	else
+		return GEN8_XCS_WATCHDOG_DISABLE;
 }
 
 static void gen8_watchdog_tasklet(unsigned long data)
@@ -2366,6 +2442,8 @@ void intel_execlists_set_default_submission(struct intel_engine_cs *engine)
 		engine->flags |= I915_ENGINE_HAS_SEMAPHORES;
 	if (engine->preempt_context)
 		engine->flags |= I915_ENGINE_HAS_PREEMPTION;
+	if(engine->id != BCS0)
+		engine->flags |= I915_ENGINE_SUPPORTS_WATCHDOG;
 }
 
 static void execlists_destroy(struct intel_engine_cs *engine)
@@ -2519,10 +2597,13 @@ int intel_execlists_submission_init(struct intel_engine_cs *engine)
 
 	reset_csb_pointers(execlists);
 
+	/* BCS engine does not have a watchdog-expired irq */
+	GEM_BUG_ON(!intel_engine_supports_watchdog(engine));
+
 	return 0;
 }
 
-static u32 intel_lr_indirect_ctx_offset(struct intel_engine_cs *engine)
+u32 intel_lr_indirect_ctx_offset(struct intel_engine_cs *engine)
 {
 	u32 indirect_ctx_offset;
 

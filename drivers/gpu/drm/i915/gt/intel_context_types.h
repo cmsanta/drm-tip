@@ -51,6 +51,12 @@ struct intel_context {
 	unsigned int active_count; /* notionally protected by timeline->mutex */
 
 	atomic_t pin_count;
+	/**
+	 * watchdog_threshold: hw watchdog threshold value,
+	 * in clock counts
+	 */
+	u32 watchdog_threshold;
+
 	struct mutex pin_mutex; /* guards pinning and associated on-gpuing */
 
 	intel_engine_mask_t saturated; /* submitting semaphores too late? */

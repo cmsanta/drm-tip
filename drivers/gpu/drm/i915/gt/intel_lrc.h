@@ -114,4 +114,6 @@ void intel_execlists_show_requests(struct intel_engine_cs *engine,
 							const char *prefix),
 				   unsigned int max);
 
+u32 get_watchdog_disable(struct intel_engine_cs *engine);
+
 #endif /* _INTEL_LRC_H_ */

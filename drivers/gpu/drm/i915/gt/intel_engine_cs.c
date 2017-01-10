@@ -334,6 +334,8 @@ intel_engine_setup(struct drm_i915_private *dev_priv,
 	if (engine->context_size)
 		DRIVER_CAPS(dev_priv)->has_logical_contexts = true;
 
+	engine->watchdog_disable_id = get_watchdog_disable(engine);
+
 	/* Nothing to do here, execute in order of dependencies */
 	engine->schedule = NULL;
 

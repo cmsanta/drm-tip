@@ -283,6 +283,7 @@ struct intel_engine_cs {
 	u8 instance;
 	u32 context_size;
 	u32 mmio_base;
+	u32 watchdog_disable_id;
 
 	struct intel_sseu sseu;
 
@@ -450,6 +451,7 @@ struct intel_engine_cs {
 #define I915_ENGINE_HAS_PREEMPTION   BIT(2)
 #define I915_ENGINE_HAS_SEMAPHORES   BIT(3)
 #define I915_ENGINE_NEEDS_BREADCRUMB_TASKLET BIT(4)
+#define I915_ENGINE_SUPPORTS_WATCHDOG BIT(5)
 	unsigned int flags;
 
 	/*
@@ -537,6 +539,12 @@ static inline bool
 intel_engine_needs_breadcrumb_tasklet(const struct intel_engine_cs *engine)
 {
 	return engine->flags & I915_ENGINE_NEEDS_BREADCRUMB_TASKLET;
+}
+
+static inline bool
+intel_engine_supports_watchdog(const struct intel_engine_cs *engine)
+{
+       return engine->flags & I915_ENGINE_SUPPORTS_WATCHDOG;
 }
 
 #define instdone_slice_mask(dev_priv__) \
