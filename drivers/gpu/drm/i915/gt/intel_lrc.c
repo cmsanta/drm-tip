@@ -2235,6 +2235,40 @@ static int gen8_emit_flush_render(struct i915_request *request,
 	return 0;
 }
 
+static void gen8_watchdog_tasklet(unsigned long data)
+{
+       struct intel_engine_cs *engine = (struct intel_engine_cs *)data;
+       struct drm_i915_private *dev_priv = engine->i915;
+       enum forcewake_domains fw_domains;
+       char msg[80];
+       size_t len = sizeof(msg);
+       unsigned long *lock = &engine->i915->gpu_error.flags;
+       unsigned int bit = I915_RESET_ENGINE + engine->id;
+
+       switch (engine->class) {
+       default:
+               MISSING_CASE(engine->id);
+               /* fall through */
+       case RENDER_CLASS:
+               fw_domains = FORCEWAKE_RENDER;
+               break;
+       case VIDEO_DECODE_CLASS:
+       case VIDEO_ENHANCEMENT_CLASS:
+               fw_domains = FORCEWAKE_MEDIA;
+               break;
+       }
+
+       intel_uncore_forcewake_get(&dev_priv->uncore, fw_domains);
+
+       if (!test_and_set_bit(bit, lock)) {
+               unsigned int hung = engine->mask;
+               engine_reset_error_to_str(dev_priv, msg, len, hung, 0, 1);
+               i915_reset_engine(engine, msg);
+               clear_bit(bit, lock);
+               wake_up_bit(lock, bit);
+       }
+}
+
 /*
  * Reserve space for 2 NOOPs at the end of each request to be
  * used as a workaround for not being allowed to do lite
@@ -2395,6 +2429,21 @@ logical_ring_default_irqs(struct intel_engine_cs *engine)
 
 	engine->irq_enable_mask = GT_RENDER_USER_INTERRUPT << shift;
 	engine->irq_keep_mask = GT_CONTEXT_SWITCH_INTERRUPT << shift;
+
+       switch (engine->class) {
+       default:
+               /* BCS engine does not support hw watchdog */
+               break;
+       case RENDER_CLASS:
+       case VIDEO_DECODE_CLASS:
+               engine->irq_keep_mask |= GT_GEN8_WATCHDOG_INTERRUPT << shift;
+               break;
+       case VIDEO_ENHANCEMENT_CLASS:
+               if (INTEL_GEN(engine->i915) >= 9)
+                       engine->irq_keep_mask |=
+                               GT_GEN8_WATCHDOG_INTERRUPT << shift;
+               break;
+       }
 }
 
 int intel_execlists_submission_setup(struct intel_engine_cs *engine)
@@ -2404,6 +2453,9 @@ int intel_execlists_submission_setup(struct intel_engine_cs *engine)
 
 	tasklet_init(&engine->execlists.tasklet,
 		     execlists_submission_tasklet, (unsigned long)engine);
+
+       tasklet_init(&engine->execlists.watchdog_tasklet,
+                    gen8_watchdog_tasklet, (unsigned long)engine);
 
 	logical_ring_default_vfuncs(engine);
 	logical_ring_default_irqs(engine);

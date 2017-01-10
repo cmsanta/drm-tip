@@ -23,6 +23,12 @@ void i915_handle_error(struct drm_i915_private *i915,
 		       intel_engine_mask_t engine_mask,
 		       unsigned long flags,
 		       const char *fmt, ...);
+void engine_reset_error_to_str(struct drm_i915_private *i915,
+               char *str,
+               size_t sz,
+               unsigned int hung,
+               unsigned int stuck,
+               unsigned int watchdog);
 #define I915_ERROR_CAPTURE BIT(0)
 
 void i915_clear_error_registers(struct drm_i915_private *i915);

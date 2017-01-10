@@ -226,22 +226,16 @@ static void hangcheck_declare_hang(struct drm_i915_private *i915,
 				   unsigned int hung,
 				   unsigned int stuck)
 {
-	struct intel_engine_cs *engine;
-	intel_engine_mask_t tmp;
 	char msg[80];
-	int len;
+	size_t len = sizeof(msg);
 
 	/* If some rings hung but others were still busy, only
 	 * blame the hanging rings in the synopsis.
 	 */
 	if (stuck != hung)
 		hung &= ~stuck;
-	len = scnprintf(msg, sizeof(msg),
-			"%s on ", stuck == hung ? "no progress" : "hang");
-	for_each_engine_masked(engine, i915, hung, tmp)
-		len += scnprintf(msg + len, sizeof(msg) - len,
-				 "%s, ", engine->name);
-	msg[len-2] = '\0';
+
+	engine_reset_error_to_str(i915, msg, len, hung, stuck, 0);
 
 	return i915_handle_error(i915, hung, I915_ERROR_CAPTURE, "%s", msg);
 }

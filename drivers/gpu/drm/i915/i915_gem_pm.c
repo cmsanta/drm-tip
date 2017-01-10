@@ -17,8 +17,10 @@ static void i915_gem_park(struct drm_i915_private *i915)
 
 	lockdep_assert_held(&i915->drm.struct_mutex);
 
-	for_each_engine(engine, i915, id)
+	for_each_engine(engine, i915, id) {
+		tasklet_kill(&engine->execlists.watchdog_tasklet);
 		i915_gem_batch_pool_fini(&engine->batch_pool);
+	}
 
 	i915_timelines_park(i915);
 	i915_vma_parked(i915);

@@ -201,6 +201,9 @@ struct i915_gpu_error {
 	 * any global resources that may be clobber by the reset (such as
 	 * FENCE registers).
 	 *
+	 * #I915_RESET_WATCHDOG - When hw detects a hang before us, we can use
+	 * I915_RESET_WATCHDOG to report the hang detection cause accurately.
+	 *
 	 * #I915_RESET_ENGINE[num_engines] - Since the driver doesn't need to
 	 * acquire the struct_mutex to reset an engine, we need an explicit
 	 * flag to prevent two concurrent reset attempts in the same engine.
@@ -216,6 +219,7 @@ struct i915_gpu_error {
 #define I915_RESET_BACKOFF	0
 #define I915_RESET_MODESET	1
 #define I915_RESET_ENGINE	2
+#define I915_RESET_WATCHDOG	3
 #define I915_WEDGED		(BITS_PER_LONG - 1)
 
 	/** Number of times the device has been reset (global) */
