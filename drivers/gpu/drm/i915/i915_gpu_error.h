@@ -120,6 +120,7 @@ struct i915_gpu_state {
 			u32 hw_id;
 			int active;
 			int guilty;
+			int watchdog_threshold;
 			struct i915_sched_attr sched_attr;
 		} context;
 
