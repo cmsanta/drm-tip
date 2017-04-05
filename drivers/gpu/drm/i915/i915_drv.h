@@ -3130,6 +3130,8 @@ i915_gem_context_lookup(struct drm_i915_file_private *file_priv, u32 id)
 	return ctx;
 }
 
+u32 watchdog_to_us(struct drm_i915_private *i915, u32 value_in_clock_counts);
+
 int i915_perf_open_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file);
 int i915_perf_add_config_ioctl(struct drm_device *dev, void *data,
