@@ -1596,6 +1596,9 @@ struct drm_i915_private {
 	struct drm_i915_fence_reg fence_regs[I915_MAX_NUM_FENCES]; /* assume 965 */
 	int num_fence_regs; /* 8 on pre-965, 16 otherwise */
 
+	/* Command stream timestamp base - helps define watchdog threshold */
+	u32 cs_timestamp_base;
+
 	unsigned int fsb_freq, mem_freq, is_ddr3;
 	unsigned int skl_preferred_vco_freq;
 	unsigned int max_cdclk_freq;

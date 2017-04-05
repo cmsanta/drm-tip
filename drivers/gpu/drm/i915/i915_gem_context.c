@@ -1384,6 +1384,114 @@ out_ce:
 	return ret;
 }
 
+/*
+ * BDW, CHV & SKL+ Timestamp timer resolution = 0.080 uSec,
+ * or 12500000 counts per second, or ~12 counts per microsecond.
+ *
+ * But BXT/GLK Timestamp timer resolution is different, 0.052 uSec,
+ * or 19200000 counts per second, or ~19 counts per microsecond.
+ *
+ * Future-proofing, some day it won't be as simple as just GEN & IS_LP.
+ */
+#define GEN8_TIMESTAMP_CNTS_PER_USEC 12
+#define GEN9_LP_TIMESTAMP_CNTS_PER_USEC 19
+u32 cs_timestamp_in_us(struct drm_i915_private *i915)
+{
+        u32 cs_timestamp_base = i915->cs_timestamp_base;
+
+        if (cs_timestamp_base)
+                return cs_timestamp_base;
+
+        switch (INTEL_GEN(i915)) {
+        default:
+                MISSING_CASE(INTEL_GEN(i915));
+                /* fall through */
+        case 9:
+                cs_timestamp_base = IS_GEN9_LP(i915) ?
+                                        GEN9_LP_TIMESTAMP_CNTS_PER_USEC :
+                                        GEN8_TIMESTAMP_CNTS_PER_USEC;
+                break;
+        case 8:
+                cs_timestamp_base = GEN8_TIMESTAMP_CNTS_PER_USEC;
+                break;
+        }
+
+        i915->cs_timestamp_base = cs_timestamp_base;
+        return cs_timestamp_base;
+}
+
+u32 watchdog_to_us(struct drm_i915_private *i915, u32 value_in_clock_counts)
+{
+        return value_in_clock_counts / cs_timestamp_in_us(i915);
+}
+
+int watchdog_to_clock_counts(struct drm_i915_private *i915, u32 *value_in_us)
+{
+        u64 threshold = *value_in_us * cs_timestamp_in_us(i915);
+        int err = 0;
+
+        if (overflows_type(threshold, u64))
+                return -E2BIG;
+
+        *value_in_us = threshold;
+
+        return err;
+}
+
+/*
+ * Based on time out value in microseconds (us) calculate
+ * timer count thresholds needed based on core frequency.
+ * Watchdog can be disabled by setting it to 0.
+ */
+int i915_gem_context_set_watchdog(struct i915_gem_context *ctx,
+                                  struct drm_i915_gem_context_param *args)
+{
+        struct drm_i915_private *i915 = ctx->i915;
+        struct intel_engine_cs *engine;
+        enum intel_engine_id id;
+        int i, err = 0;
+        struct drm_i915_gem_watchdog_timeout threshold[OTHER_CLASS];
+
+        for_each_engine(engine, i915, id) {
+                if (id!=BCS0 && !intel_engine_supports_watchdog(i915->engine[id]))
+                        return -ENODEV;
+        }
+
+        memset(threshold, 0, sizeof(threshold));
+
+        /* shortcut to disable in all engines */
+        if (args->size == 0)
+                goto set_watchdog;
+
+        if (args->size < sizeof(threshold))
+                return -EFAULT;
+
+        if (copy_from_user(threshold,
+                           u64_to_user_ptr(args->value),
+                           sizeof(threshold))) {
+                return -EFAULT;
+        }
+
+        /* not supported in blitter engine */
+        if (threshold[COPY_ENGINE_CLASS].timeout_us > 0)
+                return -EINVAL;
+
+        for (i = RENDER_CLASS; i < OTHER_CLASS; i++) {
+                err = watchdog_to_clock_counts(i915, &threshold[i].timeout_us);
+                if (err)
+                        return -EINVAL;
+        }
+
+set_watchdog:
+        for_each_engine(engine, i915, id) {
+		struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
+	        if (ce)
+			ce->watchdog_threshold = threshold[engine->class].timeout_us;
+        }
+
+        return 0;
+}
+
 static int ctx_setparam(struct drm_i915_file_private *fpriv,
 			struct i915_gem_context *ctx,
 			struct drm_i915_gem_context_param *args)
@@ -1456,6 +1564,10 @@ static int ctx_setparam(struct drm_i915_file_private *fpriv,
 	case I915_CONTEXT_PARAM_VM:
 		ret = set_ppgtt(fpriv, ctx, args);
 		break;
+
+       case I915_CONTEXT_PARAM_WATCHDOG:
+               ret = i915_gem_context_set_watchdog(ctx, args);
+               break;
 
 	case I915_CONTEXT_PARAM_BAN_PERIOD:
 	default:
@@ -1582,6 +1694,41 @@ int i915_gem_context_destroy_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
+/* On success copies to userspace the threshold value for the
+ * watchdog timer calculated in terms of clock_counts / timestamp (us)
+ */
+int i915_gem_context_get_watchdog(struct i915_gem_context *ctx,
+				  struct drm_i915_gem_context_param *args)
+{
+	struct drm_i915_private *i915 = ctx->i915;
+	struct intel_engine_cs *engine;
+	enum intel_engine_id id;
+	struct drm_i915_gem_watchdog_timeout threshold_in_us[OTHER_CLASS];
+
+	for_each_engine(engine, i915, id) {
+		/* not supported in blitter engine */
+		if (id==BCS0 && !intel_engine_supports_watchdog(i915->engine[id]))
+			return -ENODEV;
+	}
+
+	for_each_engine(engine, i915, id) {
+		struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
+		if (ce)
+			threshold_in_us[engine->class].timeout_us = watchdog_to_us(i915,
+								ce->watchdog_threshold);
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->value),
+			   &threshold_in_us,
+			   sizeof(threshold_in_us))) {
+		return -EFAULT;
+	}
+
+	args->size = sizeof(threshold_in_us);
+
+	return 0;
+}
+
 static int get_sseu(struct i915_gem_context *ctx,
 		    struct drm_i915_gem_context_param *args)
 {
@@ -1688,6 +1835,12 @@ int i915_gem_context_getparam_ioctl(struct drm_device *dev, void *data,
 		break;
 
 	case I915_CONTEXT_PARAM_BAN_PERIOD:
+		ret = set_sseu(ctx, args);
+		break;
+
+	case I915_CONTEXT_PARAM_WATCHDOG:
+		ret = i915_gem_context_get_watchdog(ctx, args);
+		break;
 	default:
 		ret = -EINVAL;
 		break;

@@ -1617,6 +1617,7 @@ struct drm_i915_reg_read {
 	 */
 	__u64 offset;
 #define I915_REG_READ_8B_WA (1ul << 0)
+#define I915_CONTEXT_PARAM_WATCHDOG	0x10
 
 	__u64 val; /* Return value */
 };
@@ -1648,6 +1649,22 @@ struct drm_i915_reset_stats {
 
 	__u32 pad;
 
+};
+
+struct drm_i915_gem_watchdog_timeout {
+	union {
+		struct {
+			/*
+			 * Engine class & instance to be configured or queried.
+			 */
+			__u16 engine_class;
+			__u16 engine_instance;
+		};
+		/* Index based addressing mode */
+		__u32 index;
+	};
+	/* GPU Engine watchdog reset timeout in us */
+	__u32 timeout_us;
 };
 
 struct drm_i915_gem_userptr {
