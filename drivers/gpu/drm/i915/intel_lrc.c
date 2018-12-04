@@ -1893,8 +1893,8 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 		GEM_BUG_ON(!engine->emit_start_watchdog ||
 			   !engine->emit_stop_watchdog);
 
-		/* + start_watchdog (6) + stop_watchdog (4) */
-		num_dwords += 10;
+		/* + start_watchdog (6) */
+		num_dwords += 6;
 		watchdog_running = true;
 	}
 
@@ -1935,10 +1935,7 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 	*cs++ = MI_ARB_ON_OFF | MI_ARB_DISABLE;
 	*cs++ = MI_NOOP;
 
-	if (watchdog_running) {
-		/* Cancel watchdog timer */
-		cs = engine->emit_stop_watchdog(rq, cs);
-	}
+	// XXX: emit_stop_watchdog happens in gen8_emit_breadcrumb_vcs
 
 	intel_ring_advance(rq, cs);
 	return 0;
@@ -2197,6 +2194,37 @@ static void gen8_emit_breadcrumb(struct i915_request *request, u32 *cs)
 }
 static const int gen8_emit_breadcrumb_sz = 6 + WA_TAIL_DWORDS;
 
+static void gen8_emit_breadcrumb_vcs(struct i915_request *request, u32 *cs)
+{
+	/* w/a: bit 5 needs to be zero for MI_FLUSH_DW address. */
+	BUILD_BUG_ON(I915_GEM_HWS_INDEX_ADDR & (1 << 5));
+
+	cs = gen8_emit_ggtt_write(cs, request->global_seqno,
+				  intel_hws_seqno_address(request->engine));
+	*cs++ = MI_USER_INTERRUPT;
+	*cs++ = MI_ARB_ON_OFF | MI_ARB_ENABLE;
+
+	// stop_watchdog at the very end of the ring commands
+	if (request->gem_context->__engine[VCS].watchdog_threshold != 0)
+	{
+		/* Cancel watchdog timer */
+		GEM_BUG_ON(!request->engine->emit_stop_watchdog);
+		cs = request->engine->emit_stop_watchdog(request, cs);
+	}
+	else
+	{
+		*cs++ = MI_NOOP;
+		*cs++ = MI_NOOP;
+		*cs++ = MI_NOOP;
+		*cs++ = MI_NOOP;
+	}
+
+	request->tail = intel_ring_offset(request, cs);
+	assert_ring_tail_valid(request->ring, request->tail);
+	gen8_emit_wa_tail(request, cs);
+}
+static const int gen8_emit_breadcrumb_vcs_sz = 6 + WA_TAIL_DWORDS + 4; //+4 for optional stop_watchdog
+
 static void gen8_emit_breadcrumb_rcs(struct i915_request *request, u32 *cs)
 {
 	/* We're using qword write, seqno should be aligned to 8 bytes. */
@@ -2314,8 +2342,17 @@ logical_ring_default_vfuncs(struct intel_engine_cs *engine)
 	engine->request_alloc = execlists_request_alloc;
 
 	engine->emit_flush = gen8_emit_flush;
-	engine->emit_breadcrumb = gen8_emit_breadcrumb;
-	engine->emit_breadcrumb_sz = gen8_emit_breadcrumb_sz;
+
+	if (engine->id == VCS || engine->id == VCS2)
+	{
+		engine->emit_breadcrumb = gen8_emit_breadcrumb_vcs;
+		engine->emit_breadcrumb_sz = gen8_emit_breadcrumb_vcs_sz;
+	}
+	else
+	{
+		engine->emit_breadcrumb = gen8_emit_breadcrumb;
+		engine->emit_breadcrumb_sz = gen8_emit_breadcrumb_sz;
+	}
 
 	engine->set_default_submission = intel_execlists_set_default_submission;
 
