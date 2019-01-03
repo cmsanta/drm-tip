@@ -748,7 +748,7 @@ static int eb_select_context(struct i915_execbuffer *eb)
 	}
 
 	eb->context_flags = 0;
-	if (test_bit(UCONTEXT_NO_ZEROMAP, &ctx->user_flags))
+	if (ctx->flags & CONTEXT_NO_ZEROMAP)
 		eb->context_flags |= __EXEC_OBJECT_NEEDS_BIAS;
 
 	return 0;
