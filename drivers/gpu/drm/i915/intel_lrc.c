@@ -2215,7 +2215,7 @@ static void gen8_emit_breadcrumb_vcs(struct i915_request *request, u32 *cs)
 	assert_ring_tail_valid(request->ring, request->tail);
 	gen8_emit_wa_tail(request, cs);
 }
-static const int gen8_emit_breadcrumb_vcs_sz = 6 + WA_TAIL_DWORDS + 6; //+4 for optional stop_watchdog
+static const int gen8_emit_breadcrumb_vcs_sz = 6 + WA_TAIL_DWORDS + 4; //+4 for optional stop_watchdog
 
 static void gen8_emit_breadcrumb_rcs(struct i915_request *request, u32 *cs)
 {
