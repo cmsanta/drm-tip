@@ -1448,40 +1448,59 @@ int i915_gem_context_set_watchdog(struct i915_gem_context *ctx,
         struct drm_i915_gem_watchdog_timeout threshold[OTHER_CLASS];
 
         for_each_engine(engine, i915, id) {
-                if (id!=BCS0 && !intel_engine_supports_watchdog(i915->engine[id]))
+                if (id!=BCS0 && !intel_engine_supports_watchdog(i915->engine[id])) {
+			printk(KERN_ERR"**** %s %d	engine_id: 0x%x \n",__FUNCTION__,__LINE__, i);
                         return -ENODEV;
+		}
         }
 
         memset(threshold, 0, sizeof(threshold));
 
         /* shortcut to disable in all engines */
-        if (args->size == 0)
+        if (args->size == 0) {
+		printk(KERN_ERR"**** %s %d	args->size:%u \n",__FUNCTION__,__LINE__, args->size);
                 goto set_watchdog;
+	}
 
-        if (args->size < sizeof(threshold))
+        if (args->size < sizeof(threshold)) { 
+		printk(KERN_ERR"**** %s %d	args->size:%u sizeof(threshold):%u\n",__FUNCTION__,__LINE__, args->size,sizeof(threshold));
                 return -EFAULT;
+	}
 
         if (copy_from_user(threshold,
                            u64_to_user_ptr(args->value),
                            sizeof(threshold))) {
+		printk(KERN_ERR"**** %s %d	\n",__FUNCTION__,__LINE__);
                 return -EFAULT;
         }
 
         /* not supported in blitter engine */
-        if (threshold[COPY_ENGINE_CLASS].timeout_us > 0)
+        if (threshold[COPY_ENGINE_CLASS].timeout_us > 0) {
+		printk(KERN_ERR"**** %s %d	\n",__FUNCTION__,__LINE__);
                 return -EINVAL;
+	}
 
         for (i = RENDER_CLASS; i < OTHER_CLASS; i++) {
+		if(i == COPY_ENGINE_CLASS){
+			printk(KERN_ERR"**** %s %d  engine_id: 0x%x \n",__FUNCTION__,__LINE__, i);
+			continue;
+		}
                 err = watchdog_to_clock_counts(i915, &threshold[i].timeout_us);
-                if (err)
+                if (err) {
+			printk(KERN_ERR"**** %s %d   \n",__FUNCTION__,__LINE__);
                         return -EINVAL;
+		}
         }
 
 set_watchdog:
         for_each_engine(engine, i915, id) {
 		struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
-	        if (ce)
+	        if (ce) {
 			ce->watchdog_threshold = threshold[engine->class].timeout_us;
+			printk(KERN_ERR"**** %s %d  ce->wd.thr: %u \n",__FUNCTION__,__LINE__, threshold[engine->class].timeout_us);
+		} else {
+			printk(KERN_ERR"**** %s %d ce==NULL engine_id: 0x%x \n",__FUNCTION__,__LINE__, id);
+		}
         }
 
         return 0;
@@ -1702,15 +1721,23 @@ int i915_gem_context_get_watchdog(struct i915_gem_context *ctx,
 
 	for_each_engine(engine, i915, id) {
 		/* not supported in blitter engine */
-		if (id==BCS0 && !intel_engine_supports_watchdog(i915->engine[id]))
+		if (id==BCS0 && !intel_engine_supports_watchdog(i915->engine[id])) {
+			printk(KERN_ERR "%s %d id = 0x%d\n",__FUNCTION__,__LINE__,id);
 			return -ENODEV;
+		} else {
+			printk(KERN_ERR "%s %d id = 0x%d\n",__FUNCTION__,__LINE__,id);
+		}
 	}
 
 	for_each_engine(engine, i915, id) {
 		struct intel_context *ce = i915_gem_context_get_engine(ctx, engine->id);
-		if (ce)
+		if (ce) {
 			threshold_in_us[engine->class].timeout_us = watchdog_to_us(i915,
 								ce->watchdog_threshold);
+			printk(KERN_ERR"**** %s %d  engine_id: 0x%x threshold: %u \n",__FUNCTION__,__LINE__, id,threshold_in_us[engine->class].timeout_us );
+		} else {
+			printk(KERN_ERR"**** %s %d ce==NULL engine_id: 0x%x \n",__FUNCTION__,__LINE__, id);
+		}
 	}
 
 	if (copy_to_user(u64_to_user_ptr(args->value),
@@ -1720,6 +1747,7 @@ int i915_gem_context_get_watchdog(struct i915_gem_context *ctx,
 	}
 
 	args->size = sizeof(threshold_in_us);
+	printk(KERN_ERR"**** %s %d size: %u\n",__FUNCTION__,__LINE__,args->size);
 
 	return 0;
 }
